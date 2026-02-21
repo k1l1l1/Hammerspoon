@@ -4,6 +4,7 @@ isDragLocked = false
 ignoreNextUp = false
 releaseNextUp = false
 keyBuffer = ""
+dragAlertStyle = { textSize = 16, radius = 8 }
 
 -- 설정 자동 리로드
 hs.alert.show("Hammerspoon 설정 로드됨")
@@ -82,14 +83,14 @@ mouseWatcher = hs.eventtap.new({
             -- 강제로 마우스 업 이벤트를 발생시켜 드래그 종료 알림
             local pos = event:location()
             hs.eventtap.event.newMouseEvent(hs.eventtap.event.types.leftMouseUp, pos):post()
-            hs.alert.show("드래그 해제", 0.2)
+            hs.alert.show("드래그 해제", 0.2, dragAlertStyle)
             return true -- 이번 하드웨어 클릭은 무시
         else
             -- 일반 클릭 -> 0.5초 타이머 시작
             dragTimer = hs.timer.doAfter(0.25, function()
                 isDragLocked = true
                 ignoreNextUp = true
-                hs.alert.show("드래그 고정", 0.2)
+                hs.alert.show("드래그 고정", 0.2, dragAlertStyle)
             end)
             return false
         end
