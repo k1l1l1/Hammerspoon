@@ -17,8 +17,9 @@ function reloadConfig(files)
 end
 configWatcher = hs.pathwatcher.new(os.getenv("HOME") .. "/.hammerspoon/", reloadConfig):start()
 
---------------------------------------------------------------------------------
--- 1. 텍스트 대치: 'qst' 또는 'ㅂㄴㅅ' -> '?'
+-- 1. 텍스트 대치:
+--    - 'qst' 또는 'ㅂㄴㅅ' -> '?'
+--    - 'trg' 또는 'ㅅㄱㅎ' -> '()'
 --------------------------------------------------------------------------------
 textWatcher = hs.eventtap.new({hs.eventtap.event.types.keyDown}, function(event)
     local char = event:getCharacters()
@@ -43,9 +44,24 @@ textWatcher = hs.eventtap.new({hs.eventtap.event.types.keyDown}, function(event)
             hs.eventtap.event.newKeyEvent({}, "delete", true):post()
             hs.eventtap.event.newKeyEvent({}, "delete", false):post()
             
-            -- '?' 입력
-            hs.eventtap.event.newKeyEvent({"shift"}, "/", true):post()
-            hs.eventtap.event.newKeyEvent({"shift"}, "/", false):post()
+            -- '?' 문자 자체를 입력
+            hs.eventtap.keyStrokes("?")
+            
+            keyBuffer = ""
+        end
+
+        -- 'trg' 또는 'ㅅㄱㅎ' 감지
+        if string.match(keyBuffer, "trg$") or string.match(keyBuffer, "ㅅㄱㅎ$") then
+            -- 백스페이스 3번 빠르게 전송
+            hs.eventtap.event.newKeyEvent({}, "delete", true):post()
+            hs.eventtap.event.newKeyEvent({}, "delete", false):post()
+            hs.eventtap.event.newKeyEvent({}, "delete", true):post()
+            hs.eventtap.event.newKeyEvent({}, "delete", false):post()
+            hs.eventtap.event.newKeyEvent({}, "delete", true):post()
+            hs.eventtap.event.newKeyEvent({}, "delete", false):post()
+
+            -- '()' 문자 자체를 입력
+            hs.eventtap.keyStrokes("()")
             
             keyBuffer = ""
         end
