@@ -62,6 +62,9 @@ textWatcher = hs.eventtap.new({hs.eventtap.event.types.keyDown}, function(event)
             hs.eventtap.event.newKeyEvent({"shift"}, "9", false):post()
             hs.eventtap.event.newKeyEvent({"shift"}, "0", true):post()
             hs.eventtap.event.newKeyEvent({"shift"}, "0", false):post()
+            -- 커서를 소괄호 안으로 이동
+            hs.eventtap.event.newKeyEvent({}, "left", true):post()
+            hs.eventtap.event.newKeyEvent({}, "left", false):post()
 
             keyBuffer = ""
         end
