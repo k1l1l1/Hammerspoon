@@ -1,0 +1,156 @@
+ObjC.import("AppKit");
+ObjC.import("Foundation");
+
+const fm = $.NSFileManager.defaultManager;
+
+function expandPath(path) {
+  return $(path).stringByExpandingTildeInPath.stringByStandardizingPath.js;
+}
+
+function isDirectory(path) {
+  const isDir = Ref();
+  const exists = fm.fileExistsAtPathIsDirectory($(path), isDir);
+  return Boolean(exists && isDir[0]);
+}
+
+function desktopFolder() {
+  return $.NSHomeDirectory().js + "/Desktop";
+}
+
+function pathFromFileURL(urlString) {
+  const url = $.NSURL.URLWithString($(urlString));
+  if (!url || url.isNil()) {
+    return null;
+  }
+  return url.path.js;
+}
+
+function finderFrontFolder() {
+  try {
+    const finder = Application("/System/Library/CoreServices/Finder.app");
+
+    try {
+      const insertionLocation = finder.insertionLocation();
+      const insertionURL = insertionLocation.url();
+      const insertionPath = pathFromFileURL(insertionURL);
+      if (insertionPath) {
+        return insertionPath;
+      }
+    } catch (_) {
+      // Fall back to the front Finder window below.
+    }
+
+    const windows = finder.finderWindows();
+
+    if (windows.length === 0) {
+      return desktopFolder();
+    }
+
+    const target = windows[0].target();
+
+    try {
+      const urlString = target.url();
+      const path = pathFromFileURL(urlString);
+      if (path) {
+        return path;
+      }
+    } catch (_) {
+      // Some virtual Finder locations do not expose a normal file URL.
+    }
+
+    throw new Error("front Finder window is not a local folder");
+  } catch (error) {
+    throw new Error(
+      "Finder current folder could not be read. Allow the shortcut to control Finder, then try again. " +
+        error.message
+    );
+  }
+}
+
+function targetFolder(argv) {
+  if (argv.length > 0 && argv[0]) {
+    const provided = expandPath(argv[0]);
+    if (!isDirectory(provided)) {
+      throw new Error("Provided target is not a folder: " + provided);
+    }
+    return provided;
+  }
+
+  const folder = expandPath(finderFrontFolder());
+  if (!isDirectory(folder)) {
+    throw new Error("Target is not a folder: " + folder);
+  }
+  return folder;
+}
+
+function two(value) {
+  return String(value).padStart(2, "0");
+}
+
+function timestamp() {
+  const now = new Date();
+  return (
+    now.getFullYear() +
+    "-" +
+    two(now.getMonth() + 1) +
+    "-" +
+    two(now.getDate()) +
+    " " +
+    two(now.getHours()) +
+    "." +
+    two(now.getMinutes()) +
+    "." +
+    two(now.getSeconds())
+  );
+}
+
+function uniqueOutputPath(folder) {
+  const cleanFolder = folder.replace(/\/+$/, "");
+  const stem = "Clipboard Image " + timestamp();
+  let path = cleanFolder + "/" + stem + ".png";
+  let counter = 2;
+
+  while (fm.fileExistsAtPath($(path))) {
+    path = cleanFolder + "/" + stem + " " + counter + ".png";
+    counter += 1;
+  }
+
+  return path;
+}
+
+function saveClipboardImage(outPath) {
+  const image = $.NSImage.alloc.initWithPasteboard($.NSPasteboard.generalPasteboard);
+  if (!image || image.isNil()) {
+    throw new Error("Clipboard does not contain an image.");
+  }
+
+  const tiffData = image.TIFFRepresentation;
+  if (!tiffData || tiffData.isNil()) {
+    throw new Error("Clipboard image could not be read.");
+  }
+
+  const bitmap = $.NSBitmapImageRep.imageRepWithData(tiffData);
+  if (!bitmap || bitmap.isNil()) {
+    throw new Error("Clipboard image could not be converted.");
+  }
+
+  const pngData = bitmap.representationUsingTypeProperties(
+    $.NSPNGFileType,
+    $.NSDictionary.dictionary
+  );
+  if (!pngData || pngData.isNil()) {
+    throw new Error("PNG data could not be created.");
+  }
+
+  const ok = pngData.writeToFileAtomically($(outPath), true);
+  if (!ok) {
+    throw new Error("PNG file could not be written: " + outPath);
+  }
+}
+
+function run(argv) {
+  const folder = targetFolder(argv);
+  const outPath = uniqueOutputPath(folder);
+  saveClipboardImage(outPath);
+  return outPath;
+}

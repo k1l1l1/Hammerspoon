@@ -382,6 +382,3 @@ end):start()
 
 remoteDesktopWatcher = hs.timer.doEvery(1, refreshRemoteDesktopState)
 refreshRemoteDesktopState()
-
--- Finder Cmd+V clipboard-image paste
-require("finder_paste")
