@@ -2,6 +2,13 @@ ObjC.import("AppKit");
 ObjC.import("Foundation");
 
 const fm = $.NSFileManager.defaultManager;
+const filePasteboardTypes = [
+  "apple files promise pasteboard type",
+  "com.apple.finder.node",
+  "com.apple.pasteboard.promised-file-url",
+  "nsfilenamespboardtype",
+  "public.file-url",
+];
 
 function expandPath(path) {
   return $(path).stringByExpandingTildeInPath.stringByStandardizingPath.js;
@@ -23,6 +30,23 @@ function pathFromFileURL(urlString) {
     return null;
   }
   return url.path.js;
+}
+
+function clipboardContainsFileReferences() {
+  const types = $.NSPasteboard.generalPasteboard.types;
+  if (!types || types.isNil()) {
+    return false;
+  }
+
+  const count = Number(types.count);
+  for (let i = 0; i < count; i += 1) {
+    const typeName = String(ObjC.unwrap(types.objectAtIndex(i))).toLowerCase();
+    if (filePasteboardTypes.indexOf(typeName) !== -1) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function finderFrontFolder() {
@@ -104,9 +128,51 @@ function timestamp() {
   );
 }
 
-function uniqueOutputPath(folder) {
+function defaultOutputStem() {
+  return "Clipboard Image " + timestamp();
+}
+
+function outputStem(rawName) {
+  let name = String(rawName || "")
+    .trim()
+    .replace(/[\/:]/g, "-")
+    .replace(/[\u0000-\u001f]/g, "");
+
+  if (/\.png$/i.test(name)) {
+    name = name.slice(0, -4);
+  }
+
+  name = name.replace(/\.+$/g, "").trim();
+
+  if (name.length === 0) {
+    throw new Error("Filename is empty.");
+  }
+
+  return $(name).precomposedStringWithCanonicalMapping.js;
+}
+
+function promptForFilename(defaultStem) {
+  const app = Application.currentApplication();
+  app.includeStandardAdditions = true;
+  let result;
+
+  try {
+    result = app.displayDialog("저장할 이미지 파일 이름을 입력하세요.", {
+      defaultAnswer: defaultStem,
+      buttons: ["취소", "저장"],
+      defaultButton: 2,
+      cancelButton: 1,
+      withTitle: "이미지 붙여넣기",
+    });
+  } catch (error) {
+    throw new Error("User cancelled filename prompt.");
+  }
+
+  return outputStem(result.textReturned);
+}
+
+function uniqueOutputPath(folder, stem) {
   const cleanFolder = folder.replace(/\/+$/, "");
-  const stem = "Clipboard Image " + timestamp();
   let path = cleanFolder + "/" + stem + ".png";
   let counter = 2;
 
@@ -118,7 +184,11 @@ function uniqueOutputPath(folder) {
   return path;
 }
 
-function saveClipboardImage(outPath) {
+function clipboardImagePngData() {
+  if (clipboardContainsFileReferences()) {
+    throw new Error("Clipboard contains file references.");
+  }
+
   const image = $.NSImage.alloc.initWithPasteboard($.NSPasteboard.generalPasteboard);
   if (!image || image.isNil()) {
     throw new Error("Clipboard does not contain an image.");
@@ -142,6 +212,10 @@ function saveClipboardImage(outPath) {
     throw new Error("PNG data could not be created.");
   }
 
+  return pngData;
+}
+
+function savePngData(outPath, pngData) {
   const ok = pngData.writeToFileAtomically($(outPath), true);
   if (!ok) {
     throw new Error("PNG file could not be written: " + outPath);
@@ -150,7 +224,9 @@ function saveClipboardImage(outPath) {
 
 function run(argv) {
   const folder = targetFolder(argv);
-  const outPath = uniqueOutputPath(folder);
-  saveClipboardImage(outPath);
+  const pngData = clipboardImagePngData();
+  const stem = promptForFilename(defaultOutputStem());
+  const outPath = uniqueOutputPath(folder, stem);
+  savePngData(outPath, pngData);
   return outPath;
 }

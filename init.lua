@@ -27,6 +27,11 @@ karabinerConfigPath = os.getenv("HOME") .. "/.config/karabiner/karabiner.json"
 karabinerPreviousProfile = nil
 karabinerDidChangeProfile = false
 remoteDesktopActive = false
+parsecHostConnected = false
+parsecLogPath = os.getenv("HOME") .. "/.parsec/log.txt"
+parsecLogMaxBytes = 128 * 1024
+parsecFpsFreshnessSeconds = 15
+parsecConnectedFreshnessSeconds = 60
 copyKeyCode = hs.keycodes.map.c
 
 function clearStatusAlert()
@@ -230,13 +235,88 @@ function isChromeRemoteDesktopActive()
         or string.find(currentURL, "chrome%-remote%-desktop") ~= nil
 end
 
-function refreshRemoteDesktopState()
-    local isActive = isChromeRemoteDesktopActive()
-    if remoteDesktopActive == isActive then return end
+function readFileTail(path, maxBytes)
+    local file = io.open(path, "r")
+    if not file then return nil end
 
-    remoteDesktopActive = isActive
-    syncKarabinerProfile(isActive)
-    setDragFeatureEnabled(not isActive)
+    local size = file:seek("end")
+    local offset = math.max((size or 0) - maxBytes, 0)
+    file:seek("set", offset)
+    local text = file:read("*a")
+    file:close()
+
+    return text
+end
+
+function parseParsecLogTimestamp(line)
+    local year, month, day, hour, min, sec = string.match(
+        line,
+        "^%[[A-Z] (%d%d%d%d)%-(%d%d)%-(%d%d) (%d%d):(%d%d):(%d%d)%]"
+    )
+
+    if not year then return nil end
+
+    return os.time({
+        year = tonumber(year),
+        month = tonumber(month),
+        day = tonumber(day),
+        hour = tonumber(hour),
+        min = tonumber(min),
+        sec = tonumber(sec)
+    })
+end
+
+function isParsecLogLineFresh(line, maxAgeSeconds)
+    local timestamp = parseParsecLogTimestamp(line)
+    if not timestamp then return false end
+
+    local age = os.difftime(os.time(), timestamp)
+    return age >= -60 and age <= maxAgeSeconds
+end
+
+function isParsecHostConnected()
+    local logText = readFileTail(parsecLogPath, parsecLogMaxBytes)
+    if not logText then return false end
+
+    local lastState = nil
+    local lastLine = nil
+
+    for line in string.gmatch(logText, "[^\r\n]+") do
+        if string.match(line, "%] %[0%] FPS:") then
+            lastState = "streaming"
+            lastLine = line
+        elseif string.match(line, "%] .+#%d+ connected%.$") then
+            lastState = "connected"
+            lastLine = line
+        elseif string.match(line, "%] .+#%d+ disconnected%.$")
+            or string.match(line, "%] .+#%d+ failed to connect") then
+            lastState = "disconnected"
+            lastLine = line
+        end
+    end
+
+    if lastState == "streaming" then
+        return isParsecLogLineFresh(lastLine, parsecFpsFreshnessSeconds)
+    end
+
+    if lastState == "connected" then
+        return isParsecLogLineFresh(lastLine, parsecConnectedFreshnessSeconds)
+    end
+
+    return false
+end
+
+function refreshRemoteDesktopState()
+    local isChromeActive = isChromeRemoteDesktopActive()
+    local isParsecActive = isParsecHostConnected()
+
+    if remoteDesktopActive ~= isChromeActive then
+        remoteDesktopActive = isChromeActive
+        syncKarabinerProfile(isChromeActive)
+    end
+
+    parsecHostConnected = isParsecActive
+    setDragFeatureEnabled(not (isChromeActive or isParsecActive))
 end
 
 -- 설정 자동 리로드

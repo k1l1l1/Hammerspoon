@@ -1,6 +1,29 @@
 local scriptPath = os.getenv("HOME") .. "/.hammerspoon/scripts/paste-clipboard-image-to-finder.sh"
 local finderBundleID = "com.apple.finder"
 local pasteKeyCode = hs.keycodes.map.v
+local filePasteboardTypes = {
+    ["apple files promise pasteboard type"] = true,
+    ["com.apple.finder.node"] = true,
+    ["com.apple.pasteboard.promised-file-url"] = true,
+    ["nsfilenamespboardtype"] = true,
+    ["public.file-url"] = true,
+}
+local imagePasteboardTypes = {
+    ["apple png pasteboard type"] = true,
+    ["com.apple.icns"] = true,
+    ["com.compuserve.gif"] = true,
+    ["com.microsoft.bmp"] = true,
+    ["next tiff v4.0 pasteboard type"] = true,
+    ["public.bmp"] = true,
+    ["public.gif"] = true,
+    ["public.heic"] = true,
+    ["public.heif"] = true,
+    ["public.image"] = true,
+    ["public.jpeg"] = true,
+    ["public.jpeg-2000"] = true,
+    ["public.png"] = true,
+    ["public.tiff"] = true,
+}
 
 finderPastePassthrough = finderPastePassthrough or false
 finderPasteTask = finderPasteTask or nil
@@ -33,6 +56,50 @@ local function sendNativeFinderPaste()
     hs.timer.doAfter(0.25, function()
         finderPastePassthrough = false
     end)
+end
+
+local function clipboardContentTypes()
+    local contentTypesFn = hs.pasteboard.contentTypes or hs.pasteboard.allContentTypes
+    if type(contentTypesFn) ~= "function" then
+        return nil
+    end
+
+    local ok, types = pcall(contentTypesFn)
+    if ok and type(types) == "table" then
+        return types
+    end
+
+    return nil
+end
+
+local function clipboardTypesContain(types, candidates)
+    for _, pasteboardType in pairs(types) do
+        if type(pasteboardType) == "table" then
+            if clipboardTypesContain(pasteboardType, candidates) then
+                return true
+            end
+        else
+            local normalizedType = string.lower(tostring(pasteboardType))
+            if candidates[normalizedType] then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+local function clipboardContainsStandaloneImage()
+    local types = clipboardContentTypes()
+    if not types then
+        return false
+    end
+
+    if clipboardTypesContain(types, filePasteboardTypes) then
+        return false
+    end
+
+    return clipboardTypesContain(types, imagePasteboardTypes)
 end
 
 local function finderTargetFolder()
@@ -86,8 +153,18 @@ local function pasteClipboardImageToFinder()
             return
         end
 
-        if string.find(output, "Clipboard does not contain an image", 1, true) then
+        if string.find(output, "Clipboard does not contain an image", 1, true)
+            or string.find(output, "Clipboard contains file references", 1, true) then
             sendNativeFinderPaste()
+            return
+        end
+
+        if string.find(output, "User cancelled filename prompt", 1, true) then
+            return
+        end
+
+        if string.find(output, "Filename is empty", 1, true) then
+            notify("파일 이름이 비어 있음")
             return
         end
 
@@ -105,6 +182,10 @@ finderPasteWatcher = hs.eventtap.new({hs.eventtap.event.types.keyDown}, function
 
     if finderPastePassthrough then
         finderPastePassthrough = false
+        return false
+    end
+
+    if not clipboardContainsStandaloneImage() then
         return false
     end
 
