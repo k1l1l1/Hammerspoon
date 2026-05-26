@@ -1,6 +1,8 @@
 local scriptPath = os.getenv("HOME") .. "/.hammerspoon/scripts/paste-clipboard-image-to-finder.sh"
 local finderBundleID = "com.apple.finder"
 local pasteKeyCode = hs.keycodes.map.v
+local parsecClipboardWaitSeconds = 1.0
+local parsecClipboardSettleSeconds = 0.08
 local filePasteboardTypes = {
     ["apple files promise pasteboard type"] = true,
     ["com.apple.finder.node"] = true,
@@ -27,6 +29,7 @@ local imagePasteboardTypes = {
 
 finderPastePassthrough = finderPastePassthrough or false
 finderPasteTask = finderPasteTask or nil
+finderPastePendingParsecClipboard = finderPastePendingParsecClipboard or false
 
 local function notify(message)
     if type(showStatusAlert) == "function" then
@@ -46,7 +49,7 @@ local function isPlainCommandV(event)
 
     return event:getKeyCode() == pasteKeyCode
         and flags.cmd
-        and not (flags.ctrl or flags.alt or flags.shift or flags.fn)
+        and not (flags.ctrl or flags.alt or flags.shift)
 end
 
 local function sendNativeFinderPaste()
@@ -100,6 +103,18 @@ local function clipboardContainsStandaloneImage()
     end
 
     return clipboardTypesContain(types, imagePasteboardTypes)
+end
+
+local function parsecHostIsConnected()
+    if parsecHostConnected then
+        return true
+    end
+
+    if type(isParsecHostConnected) == "function" then
+        return isParsecHostConnected()
+    end
+
+    return false
 end
 
 local function finderTargetFolder()
@@ -175,6 +190,37 @@ local function pasteClipboardImageToFinder()
     finderPasteTask:start()
 end
 
+local function handleDeferredParsecPaste()
+    if not frontAppIsFinder() then
+        return
+    end
+
+    pasteClipboardImageToFinder()
+end
+
+local function waitForParsecClipboardThenPaste()
+    if finderPastePendingParsecClipboard then
+        return
+    end
+
+    finderPastePendingParsecClipboard = true
+
+    if type(hs.pasteboard.callbackWhenChanged) ~= "function" then
+        hs.timer.doAfter(parsecClipboardWaitSeconds, function()
+            finderPastePendingParsecClipboard = false
+            handleDeferredParsecPaste()
+        end)
+        return
+    end
+
+    hs.pasteboard.callbackWhenChanged(parsecClipboardWaitSeconds, function()
+        hs.timer.doAfter(parsecClipboardSettleSeconds, function()
+            finderPastePendingParsecClipboard = false
+            handleDeferredParsecPaste()
+        end)
+    end)
+end
+
 finderPasteWatcher = hs.eventtap.new({hs.eventtap.event.types.keyDown}, function(event)
     if not isPlainCommandV(event) or not frontAppIsFinder() then
         return false
@@ -186,6 +232,11 @@ finderPasteWatcher = hs.eventtap.new({hs.eventtap.event.types.keyDown}, function
     end
 
     if not clipboardContainsStandaloneImage() then
+        if parsecHostIsConnected() then
+            waitForParsecClipboardThenPaste()
+            return true
+        end
+
         return false
     end
 

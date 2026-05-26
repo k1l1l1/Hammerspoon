@@ -9,6 +9,21 @@ const filePasteboardTypes = [
   "nsfilenamespboardtype",
   "public.file-url",
 ];
+const directPngPasteboardTypes = ["public.png", "apple png pasteboard type"];
+const convertibleImagePasteboardTypes = [
+  "public.tiff",
+  "next tiff v4.0 pasteboard type",
+  "public.jpeg",
+  "public.jpeg-2000",
+  "public.gif",
+  "public.bmp",
+  "public.heic",
+  "public.heif",
+  "public.image",
+  "com.microsoft.bmp",
+  "com.compuserve.gif",
+  "com.apple.icns",
+];
 
 function expandPath(path) {
   return $(path).stringByExpandingTildeInPath.stringByStandardizingPath.js;
@@ -32,21 +47,70 @@ function pathFromFileURL(urlString) {
   return url.path.js;
 }
 
-function clipboardContainsFileReferences() {
+function pasteboardTypeNames() {
   const types = $.NSPasteboard.generalPasteboard.types;
   if (!types || types.isNil()) {
-    return false;
+    return [];
   }
 
+  const names = [];
   const count = Number(types.count);
   for (let i = 0; i < count; i += 1) {
-    const typeName = String(ObjC.unwrap(types.objectAtIndex(i))).toLowerCase();
-    if (filePasteboardTypes.indexOf(typeName) !== -1) {
+    names.push(String(ObjC.unwrap(types.objectAtIndex(i))).toLowerCase());
+  }
+
+  return names;
+}
+
+function clipboardContainsFileReferences() {
+  const types = pasteboardTypeNames();
+  for (let i = 0; i < types.length; i += 1) {
+    if (filePasteboardTypes.indexOf(types[i]) !== -1) {
       return true;
     }
   }
 
   return false;
+}
+
+function pasteboardDataForType(typeName) {
+  const data = $.NSPasteboard.generalPasteboard.dataForType($(typeName));
+  if (!data || data.isNil() || Number(data.length) === 0) {
+    return null;
+  }
+
+  return data;
+}
+
+function pngDataFromImage(image) {
+  if (!image || image.isNil()) {
+    return null;
+  }
+
+  const tiffData = image.TIFFRepresentation;
+  if (!tiffData || tiffData.isNil()) {
+    return null;
+  }
+
+  const bitmap = $.NSBitmapImageRep.imageRepWithData(tiffData);
+  if (!bitmap || bitmap.isNil()) {
+    return null;
+  }
+
+  const pngData = bitmap.representationUsingTypeProperties(
+    $.NSPNGFileType,
+    $.NSDictionary.dictionary
+  );
+  if (!pngData || pngData.isNil() || Number(pngData.length) === 0) {
+    return null;
+  }
+
+  return pngData;
+}
+
+function pngDataFromImageData(data) {
+  const image = $.NSImage.alloc.initWithData(data);
+  return pngDataFromImage(image);
 }
 
 function finderFrontFolder() {
@@ -171,6 +235,14 @@ function promptForFilename(defaultStem) {
   return outputStem(result.textReturned);
 }
 
+function requestedOutputStem(argv, defaultStem) {
+  if (argv.length > 1 && argv[1]) {
+    return outputStem(argv[1]);
+  }
+
+  return promptForFilename(defaultStem);
+}
+
 function uniqueOutputPath(folder, stem) {
   const cleanFolder = folder.replace(/\/+$/, "");
   let path = cleanFolder + "/" + stem + ".png";
@@ -189,27 +261,34 @@ function clipboardImagePngData() {
     throw new Error("Clipboard contains file references.");
   }
 
+  const typeNames = pasteboardTypeNames();
+
+  for (let i = 0; i < directPngPasteboardTypes.length; i += 1) {
+    if (typeNames.indexOf(directPngPasteboardTypes[i]) !== -1) {
+      const data = pasteboardDataForType(directPngPasteboardTypes[i]);
+      if (data) {
+        return data;
+      }
+    }
+  }
+
+  for (let i = 0; i < convertibleImagePasteboardTypes.length; i += 1) {
+    if (typeNames.indexOf(convertibleImagePasteboardTypes[i]) !== -1) {
+      const data = pasteboardDataForType(convertibleImagePasteboardTypes[i]);
+      if (data) {
+        const pngData = pngDataFromImageData(data);
+        if (pngData) {
+          return pngData;
+        }
+      }
+    }
+  }
+
   const image = $.NSImage.alloc.initWithPasteboard($.NSPasteboard.generalPasteboard);
-  if (!image || image.isNil()) {
+  const pngData = pngDataFromImage(image);
+
+  if (!pngData) {
     throw new Error("Clipboard does not contain an image.");
-  }
-
-  const tiffData = image.TIFFRepresentation;
-  if (!tiffData || tiffData.isNil()) {
-    throw new Error("Clipboard image could not be read.");
-  }
-
-  const bitmap = $.NSBitmapImageRep.imageRepWithData(tiffData);
-  if (!bitmap || bitmap.isNil()) {
-    throw new Error("Clipboard image could not be converted.");
-  }
-
-  const pngData = bitmap.representationUsingTypeProperties(
-    $.NSPNGFileType,
-    $.NSDictionary.dictionary
-  );
-  if (!pngData || pngData.isNil()) {
-    throw new Error("PNG data could not be created.");
   }
 
   return pngData;
@@ -225,7 +304,7 @@ function savePngData(outPath, pngData) {
 function run(argv) {
   const folder = targetFolder(argv);
   const pngData = clipboardImagePngData();
-  const stem = promptForFilename(defaultOutputStem());
+  const stem = requestedOutputStem(argv, defaultOutputStem());
   const outPath = uniqueOutputPath(folder, stem);
   savePngData(outPath, pngData);
   return outPath;
